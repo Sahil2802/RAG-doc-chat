@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import supabase from "../services/supabase";
+import { AuthRequest } from "../types";
 
 const signup = async (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -22,4 +23,21 @@ const signin = async (req: Request, res: Response) => {
   res.json({ data });
 };
 
-export { signup, signin };
+// Protected route: Get current authenticated user
+const getCurrentUser = async (req: AuthRequest, res: Response) => {
+  // User is already attached by authenticate middleware
+  if (!req.user) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  res.json({
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      created_at: req.user.created_at,
+      updated_at: req.user.updated_at,
+    },
+  });
+};
+
+export { signup, signin, getCurrentUser };
