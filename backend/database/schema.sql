@@ -12,6 +12,7 @@ CREATE TABLE conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     title TEXT DEFAULT 'New Chat',
+    message_count INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -218,6 +219,34 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER update_conversation_on_new_message
 AFTER
 INSERT ON messages FOR EACH ROW EXECUTE FUNCTION update_conversation_timestamp();
+-- =====================================================
+-- MESSAGE COUNT MAINTENANCE
+-- Increment/decrement `conversations.message_count` on messages insert/delete
+-- =====================================================
+CREATE OR REPLACE FUNCTION increment_conversation_message_count() RETURNS TRIGGER AS $$ BEGIN
+UPDATE conversations
+SET message_count = COALESCE(message_count, 0) + 1
+WHERE id = NEW.conversation_id;
+RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION decrement_conversation_message_count() RETURNS TRIGGER AS $$ BEGIN
+UPDATE conversations
+SET message_count = GREATEST(COALESCE(message_count, 0) - 1, 0)
+WHERE id = OLD.conversation_id;
+RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+-- Triggers to maintain message_count
+CREATE TRIGGER increment_message_count_after_insert
+AFTER
+INSERT ON messages FOR EACH ROW EXECUTE FUNCTION increment_conversation_message_count();
+CREATE TRIGGER decrement_message_count_after_delete
+AFTER DELETE ON messages FOR EACH ROW EXECUTE FUNCTION decrement_conversation_message_count();
+-- Backfill note: to populate `message_count` for existing data run:
+-- UPDATE conversations c SET message_count = sub.count FROM (
+--   SELECT conversation_id, COUNT(*) as count FROM messages GROUP BY conversation_id
+-- ) sub WHERE c.id = sub.conversation_id;
 -- =====================================================
 -- STORAGE BUCKET (Run this in Supabase Dashboard -> Storage)
 -- =====================================================

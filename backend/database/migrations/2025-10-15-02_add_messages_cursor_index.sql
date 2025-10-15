@@ -1,0 +1,43 @@
+-- Migration: Add composite index for cursor-based pagination on messages
+-- Optimizes queries with conversation_id + created_at + id ordering (DESC)
+-- This enables O(1) pagination performance regardless of table size
+BEGIN;
+-- Drop old single-column indexes if they exist (replaced by composite)
+-- Note: Keep idx_messages_conversation_id if you have queries that only filter by conversation_id
+-- DROP INDEX IF EXISTS idx_messages_created_at;
+-- Create composite index for cursor pagination (ChatGPT-style DESC ordering)
+-- This index supports queries like:
+--   SELECT * FROM messages 
+--   WHERE conversation_id = ? 
+--     AND (created_at, id) < (?, ?)
+--   ORDER BY created_at DESC, id DESC
+--   LIMIT 50;
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_cursor_desc ON messages (conversation_id, created_at DESC, id DESC);
+-- Optional: Add composite index for ASC ordering (if you need forward pagination)
+-- Only create this if you frequently query with ASC ordering
+-- CREATE INDEX IF NOT EXISTS idx_messages_conversation_cursor_asc
+-- ON messages (conversation_id, created_at ASC, id ASC);
+COMMIT;
+-- =====================================================
+-- NOTES
+-- =====================================================
+-- 1. This index covers all queries in getMessages controller:
+--    - Initial load: ORDER BY created_at DESC, id DESC
+--    - Load older (direction=before): WHERE (created_at,id) < cursor ORDER BY DESC
+--    - Load newer (direction=after): WHERE (created_at,id) > cursor ORDER BY ASC
+--
+-- 2. Index size: ~40-50 bytes per row (UUID + timestamp + UUID)
+--    For 1M messages: ~50MB index size (acceptable)
+--
+-- 3. The DESC ordering in the index matches the most common query pattern
+--    (initial load and "load older" for chat history)
+--
+-- 4. Postgres can scan indexes backwards, so ASC queries can also use this index
+--    (though slightly less efficient; create separate ASC index if needed)
+--
+-- 5. This replaces the need for these separate indexes:
+--    - idx_messages_conversation_id (covered by first column)
+--    - idx_messages_created_at (covered by composite)
+--
+-- 6. Keep idx_messages_conversation_created composite index from schema.sql
+--    or replace it with this one (they serve similar purposes)
